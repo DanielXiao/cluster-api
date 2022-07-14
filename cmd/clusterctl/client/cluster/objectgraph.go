@@ -234,6 +234,17 @@ func (o *objectGraph) ownerToVirtualNode(owner metav1.OwnerReference) *node {
 		virtual:    true,
 		// NOTE: deferring initialization of fields derived from object meta to when the node reference is actually processed.
 	}
+	ownerApiVersion := strings.Split(owner.APIVersion, "/")
+	kindAPIString := fmt.Sprintf("%ss.%s", strings.ToLower(owner.Kind), ownerApiVersion[0])
+	if info, ok := o.types[kindAPIString]; ok {
+		storageApiVersion := info.typeMeta.APIVersion
+		if storageApiVersion != owner.APIVersion {
+			logf.Log.V(5).Info(fmt.Sprintf("Build a node by other node's OwnerReference %v, change apiVersion to storage version %s", owner, storageApiVersion))
+			ownerNode.identity.APIVersion = storageApiVersion
+		}
+	} else {
+		logf.Log.V(7).Info(fmt.Sprintf("Resource %s is not a backup target", kindAPIString))
+	}
 
 	o.uidToNode[ownerNode.identity.UID] = ownerNode
 	return ownerNode

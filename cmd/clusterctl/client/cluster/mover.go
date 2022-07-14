@@ -922,6 +922,17 @@ func (o *objectMover) backupTargetObject(nodeToCreate *node, directory string) e
 		return errors.Wrapf(err, "error reading %q %s/%s",
 			obj.GroupVersionKind(), obj.GetNamespace(), obj.GetName())
 	}
+	ownerReferences := obj.GetOwnerReferences()
+	for i, _ := range ownerReferences {
+		for ownerNode, _ := range nodeToCreate.owners {
+			if ownerNode.identity.UID == ownerReferences[i].UID && ownerNode.identity.APIVersion != ownerReferences[i].APIVersion {
+				logf.Log.V(1).Info(fmt.Sprintf("Change %s %s/%s's OwnerReference apiVersion %s to storage version %s",
+					obj.GetKind(), obj.GetNamespace(), obj.GetName(), ownerReferences[i].APIVersion, ownerNode.identity.APIVersion))
+				ownerReferences[i].APIVersion = ownerNode.identity.APIVersion
+			}
+		}
+	}
+	obj.SetOwnerReferences(ownerReferences)
 
 	// Get JSON for object and write it into the configured directory
 	byObj, err := obj.MarshalJSON()
