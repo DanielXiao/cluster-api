@@ -208,6 +208,7 @@ func (o *objectGraph) processOwnerReferences(obj *unstructured.Unstructured, nod
 		ownerNode, ok := o.uidToNode[ownerReference.UID]
 		if !ok {
 			ownerNode = o.ownerToVirtualNode(ownerReference)
+			logf.Log.V(5).Info(fmt.Sprintf("Added a new virtual node %+v from %s %s/%s 's ownerReferences", ownerNode, obj.GetKind(), obj.GetNamespace(), obj.GetName()))
 		}
 
 		node.addOwner(ownerNode, ownerReferenceAttributes{
@@ -234,18 +235,20 @@ func (o *objectGraph) ownerToVirtualNode(owner metav1.OwnerReference) *node {
 		virtual:    true,
 		// NOTE: deferring initialization of fields derived from object meta to when the node reference is actually processed.
 	}
-	ownerApiVersion := strings.Split(owner.APIVersion, "/")
-	kindAPIString := fmt.Sprintf("%ss.%s", strings.ToLower(owner.Kind), ownerApiVersion[0])
-	if info, ok := o.types[kindAPIString]; ok {
+	typeMeta := metav1.TypeMeta{
+		Kind:       owner.Kind,
+		APIVersion: owner.APIVersion,
+	}
+	log := logf.Log
+	if info, ok := o.types[getKindAPIString(typeMeta)]; ok {
 		storageApiVersion := info.typeMeta.APIVersion
 		if storageApiVersion != owner.APIVersion {
-			logf.Log.V(5).Info(fmt.Sprintf("Build a node by other node's OwnerReference %v, change apiVersion to storage version %s", owner, storageApiVersion))
+			log.V(5).Info(fmt.Sprintf("OwnerReference %+v 's apiVersion is not the storage apiVersion %s", owner, storageApiVersion))
 			ownerNode.identity.APIVersion = storageApiVersion
 		}
 	} else {
-		logf.Log.V(7).Info(fmt.Sprintf("Resource %s is not a backup target", kindAPIString))
+		log.V(7).Info(fmt.Sprintf("OwnerReferenced object %+v is not a backup target", owner))
 	}
-
 	o.uidToNode[ownerNode.identity.UID] = ownerNode
 	return ownerNode
 }
@@ -254,6 +257,7 @@ func (o *objectGraph) ownerToVirtualNode(owner metav1.OwnerReference) *node {
 // If the node corresponding to the Kubernetes object already exists as a virtual node detected when processing OwnerReferences,
 // the node is marked as Observed.
 func (o *objectGraph) objToNode(obj *unstructured.Unstructured) (*node, error) {
+	log := logf.Log
 	existingNode, found := o.uidToNode[obj.GetUID()]
 	if found {
 		existingNode.markObserved()
@@ -284,6 +288,7 @@ func (o *objectGraph) objToNode(obj *unstructured.Unstructured) (*node, error) {
 	}
 
 	o.uidToNode[newNode.identity.UID] = newNode
+	log.V(5).Info(fmt.Sprintf("Added a new node %+v from %s %s/%s", newNode, obj.GetKind(), obj.GetNamespace(), obj.GetName()))
 	return newNode, nil
 }
 
@@ -472,6 +477,11 @@ func (o *objectGraph) Discovery(namespace string) error {
 	// Completes the graph by setting for each node the list of tenants the node belongs to.
 	o.setTenants()
 
+	for _, node := range o.uidToNode {
+		if node.identity.Name == "" || node.identity.Namespace == "" {
+			log.V(5).Info(fmt.Sprintf("Error: Node %+v 's namespace or name is empty", node))
+		}
+	}
 	return nil
 }
 
